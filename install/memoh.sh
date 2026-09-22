@@ -307,12 +307,13 @@ msg_info "Verifiziere Installation ..."
 pct exec "$CT_ID" -- systemctl is-active memoh || { msg_error "systemd-Service memoh ist nicht active."; pct exec "$CT_ID" -- systemctl status memoh --no-pager || true; exit 1; }
 msg_ok "Service läuft (systemctl is-active memoh = active)."
 
-# Hinweis: Die API hat kein GET / (antwortet dort korrekt 404) – Health-Check ist /health.
-# Retry-Schleife statt Einzel-Schuss, da der Erststart (Images, Migration) Minuten dauern kann.
+# Hinweis: Die API hat kein GET / (404 per Design), und GET /health gibt 405 –
+# /health akzeptiert nur HEAD (Dockers eigener Healthcheck nutzt ebenfalls HEAD).
+# Darum: curl -I. Retry-Schleife, da der Erststart Minuten dauern kann.
 msg_info "Warte auf API (max. 3 Min) ..."
 API_OK=0
 for _ in $(seq 1 18); do
-  if pct exec "$CT_ID" -- curl -fs -m 10 "http://localhost:${API_PORT}/health" >/dev/null 2>&1; then API_OK=1; break; fi
+  if pct exec "$CT_ID" -- curl -fSsI -m 10 "http://localhost:${API_PORT}/health" >/dev/null 2>&1; then API_OK=1; break; fi
   sleep 10
 done
 [[ "$API_OK" == "1" ]] \

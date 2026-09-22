@@ -20,7 +20,7 @@ die() { echo "[XX] $*" >&2; exit 1; }
 
 log "1/4 Pakete + Docker prüfen ..."
 sudo apt-get update
-sudo apt-get install -y git curl openssl ca-certificates
+sudo apt-get install -y git curl openssl ca-certificates gpg
 if ! command -v docker >/dev/null; then
   log "Installiere Docker (offizielles Repo) ..."
   sudo install -m 0755 -d /etc/apt/keyrings

@@ -217,7 +217,7 @@ pct exec "$CT_ID" -- bash -c "
   set -euo pipefail
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y git curl openssl ca-certificates sudo
+  apt-get install -y git curl openssl ca-certificates sudo gpg
   if ! command -v docker >/dev/null; then
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -230,14 +230,16 @@ pct exec "$CT_ID" -- bash -c "
   id memoh >/dev/null 2>&1 || useradd -m -s /bin/bash memoh
   usermod -aG docker memoh
   echo 'memoh ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/memoh
-" 2>&1 | tail -n 20
+"
+# Hinweis: bewusst kein '| tail' hier – mit pipefail würde der trap sonst
+# die Pipe (tail) statt des gescheiterten pct-Befehls melden. Voll-Output steht im Log.
 
 msg_info "Installiere Memoh (Basis-Stack, silent, ohne Connect-It/Tunnel) ..."
 pct exec "$CT_ID" -- su - memoh -c "
   set -euo pipefail
   export MEMOH_CONNECT_IT_MODE=disabled MEMOH_INSTALL_MODE=auto
   curl -fsSL https://memoh.sh | sh -s -- -y
-" 2>&1 | tail -n 30
+"
 
 # systemd-Unit aus diesem Repo übernehmen (fällt auf Inline-Unit zurück)
 SERVICE_URL="${MEMOH_SERVICE_URL:-https://raw.githubusercontent.com/HatchetMan111/Memoh-Proxmox/main/systemd/memoh.service}"

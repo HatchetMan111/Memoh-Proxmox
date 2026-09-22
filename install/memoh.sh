@@ -329,6 +329,14 @@ done
   || { msg_error "Web UI antwortet nicht auf localhost:${WEB_PORT}/."; pct exec "$CT_ID" -- docker compose -f $MEMOH_DIR/docker-compose.yml logs --tail=50 web || true; exit 1; }
 msg_ok "Web UI antwortet (HTTP 200 auf localhost:${WEB_PORT}/)."
 
+# Admin-Credentials aus der Container-config.toml lesen (dort Klartext, vom Installer
+# generiert oder wiederverwendet – funktioniert für Fresh- und Update-Läufe).
+msg_info "Lese Admin-Zugangsdaten ..."
+FINAL_ADMIN_USER="$(pct exec "$CT_ID" -- su - memoh -c "sed -n '/^\\[admin\\]/,/^\\[/p' \"$MEMOH_DIR/config.toml\" | grep '^username' | head -n1 | cut -d'\"' -f2" 2>/dev/null || true)"
+FINAL_ADMIN_PASS="$(pct exec "$CT_ID" -- su - memoh -c "sed -n '/^\\[admin\\]/,/^\\[/p' \"$MEMOH_DIR/config.toml\" | grep '^password' | head -n1 | cut -d'\"' -f2" 2>/dev/null || true)"
+[[ -n "${FINAL_ADMIN_USER:-}" ]] || FINAL_ADMIN_USER="<unbekannt – siehe $MEMOH_DIR/config.toml [admin]>"
+[[ -n "${FINAL_ADMIN_PASS:-}" ]] || FINAL_ADMIN_PASS="<unbekannt – siehe $MEMOH_DIR/config.toml [admin]>"
+
 echo ""
 echo "════════════════ INSTALLATION ERFOLGREICH ════════════════"
 echo "  App          : Memoh – Open-Source Multi-Agent Platform"
@@ -336,7 +344,7 @@ echo "  Container    : CT $CT_ID (Hostname: $HOSTNAME_ARG, privilegiert, onboot=
 echo "  Ressourcen   : $CORES vCPU / $RAM MB RAM / $DISK GB Disk"
 echo "  Web UI       : http://${CT_IP}:${WEB_PORT}"
 echo "  API          : http://${CT_IP}:${API_PORT}"
-echo "  Login        : aus Installer-Output (silent: zufällig generiert – im Log suchen)"
+echo "  Login        : ${FINAL_ADMIN_USER} / ${FINAL_ADMIN_PASS}  (nur jetzt angezeigt – danach ändern!)"
 echo "  Root-Passwort: ${PASSWORD_ARG:-<bestehender CT, unverändert>} (nur jetzt angezeigt!)"
 echo "  Service      : systemctl status memoh  (im Container via: pct enter $CT_ID)"
 echo "  Stack        : cd ~/memoh && docker compose ps / docker compose logs -f (als memoh)"

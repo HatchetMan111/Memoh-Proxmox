@@ -213,24 +213,27 @@ msg_ok "Container-IP: $CT_IP"
 # 4. Docker + Memoh im Container (via pct exec, idempotent)
 # ---------------------------------------------------------------------------
 msg_info "Installiere Docker im Container ..."
-pct exec "$CT_ID" -- bash -c "
+# Hinweis: äußere Single-Quotes – der Block läuft dadurch 1:1 im Container,
+# ohne dass die Host-Shell $ oder $(...) anfasst (kein Escaping nötig).
+pct exec "$CT_ID" -- bash -c '
   set -euo pipefail
   export DEBIAN_FRONTEND=noninteractive
+  rm -f /etc/apt/sources.list.d/docker.list
   apt-get update
   apt-get install -y git curl openssl ca-certificates sudo gpg
   if ! command -v docker >/dev/null; then
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
     chmod a+r /etc/apt/keyrings/docker.gpg
-    echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \$(. /etc/os-release && echo \\\"\\\$VERSION_CODENAME\\\") stable\" > /etc/apt/sources.list.d/docker.list
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
     apt-get update
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
   fi
   docker compose version
   id memoh >/dev/null 2>&1 || useradd -m -s /bin/bash memoh
   usermod -aG docker memoh
-  echo 'memoh ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/memoh
-"
+  echo "memoh ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/memoh
+'
 # Hinweis: bewusst kein '| tail' hier – mit pipefail würde der trap sonst
 # die Pipe (tail) statt des gescheiterten pct-Befehls melden. Voll-Output steht im Log.
 

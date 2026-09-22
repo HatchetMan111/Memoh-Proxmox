@@ -306,13 +306,27 @@ pct exec "$CT_ID" -- systemctl enable --now memoh
 msg_info "Verifiziere Installation ..."
 pct exec "$CT_ID" -- systemctl is-active memoh || { msg_error "systemd-Service memoh ist nicht active."; pct exec "$CT_ID" -- systemctl status memoh --no-pager || true; exit 1; }
 msg_ok "Service läuft (systemctl is-active memoh = active)."
-sleep 20  # Erststart zieht Images (1–2 Min beim allerersten Lauf möglich)
-pct exec "$CT_ID" -- curl -fs -m 15 "http://localhost:${API_PORT}/" >/dev/null \
-  || { msg_error "API antwortet nicht auf localhost:${API_PORT}."; pct exec "$CT_ID" -- docker compose -f $MEMOH_DIR/docker-compose.yml logs --tail=50 server || true; exit 1; }
-msg_ok "API antwortet (HTTP 200 auf localhost:${API_PORT})."
-pct exec "$CT_ID" -- curl -fs -m 15 "http://localhost:${WEB_PORT}/" >/dev/null \
-  || { msg_error "Web UI antwortet nicht auf localhost:${WEB_PORT}."; pct exec "$CT_ID" -- docker compose -f $MEMOH_DIR/docker-compose.yml logs --tail=50 web || true; exit 1; }
-msg_ok "Web UI antwortet (HTTP 200 auf localhost:${WEB_PORT})."
+
+# Hinweis: Die API hat kein GET / (antwortet dort korrekt 404) – Health-Check ist /health.
+# Retry-Schleife statt Einzel-Schuss, da der Erststart (Images, Migration) Minuten dauern kann.
+msg_info "Warte auf API (max. 3 Min) ..."
+API_OK=0
+for _ in $(seq 1 18); do
+  if pct exec "$CT_ID" -- curl -fs -m 10 "http://localhost:${API_PORT}/health" >/dev/null 2>&1; then API_OK=1; break; fi
+  sleep 10
+done
+[[ "$API_OK" == "1" ]] \
+  || { msg_error "API antwortet nicht auf localhost:${API_PORT}/health."; pct exec "$CT_ID" -- docker compose -f $MEMOH_DIR/docker-compose.yml logs --tail=50 server || true; exit 1; }
+msg_ok "API antwortet (HTTP 200 auf localhost:${API_PORT}/health)."
+msg_info "Warte auf Web UI (max. 3 Min) ..."
+WEB_OK=0
+for _ in $(seq 1 18); do
+  if pct exec "$CT_ID" -- curl -fs -m 10 "http://localhost:${WEB_PORT}/" >/dev/null 2>&1; then WEB_OK=1; break; fi
+  sleep 10
+done
+[[ "$WEB_OK" == "1" ]] \
+  || { msg_error "Web UI antwortet nicht auf localhost:${WEB_PORT}/."; pct exec "$CT_ID" -- docker compose -f $MEMOH_DIR/docker-compose.yml logs --tail=50 web || true; exit 1; }
+msg_ok "Web UI antwortet (HTTP 200 auf localhost:${WEB_PORT}/)."
 
 echo ""
 echo "════════════════ INSTALLATION ERFOLGREICH ════════════════"

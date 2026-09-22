@@ -238,11 +238,28 @@ pct exec "$CT_ID" -- bash -c '
 # die Pipe (tail) statt des gescheiterten pct-Befehls melden. Voll-Output steht im Log.
 
 msg_info "Installiere Memoh (Basis-Stack, silent, ohne Connect-It/Tunnel) ..."
-pct exec "$CT_ID" -- su - memoh -c "
+pct exec "$CT_ID" -- su - memoh -c '
   set -euo pipefail
   export MEMOH_CONNECT_IT_MODE=disabled MEMOH_INSTALL_MODE=auto
   curl -fsSL https://memoh.sh | sh -s -- -y
-"
+' || msg_warn "Memoh-Installer meldete Fehler – prüfe gleich, ob es der bekannte Connect-It-Bug ist."
+
+# Upstream-Bug-Workaround (muss nach JEDEM Installer-Lauf stehen, da der Installer
+# das Token bei jedem Lauf neu generiert): Mit MEMOH_CONNECT_IT_MODE=disabled erzeugt
+# https://memoh.sh trotzdem ein MEMOH_CONNECT_IT_API_TOKEN und reicht es per Compose-Env
+# an memoh-server weiter, während base_url leer bleibt. Der Server startet dann nicht:
+# 'connect_it: base_url and api_token must be configured together' -> server unhealthy.
+# Fix: Token aus .env entfernen (beide leer = sauber deaktiviert) und Stack hochfahren.
+msg_info "Wende Connect-It-Workaround an (Token leeren, Stack starten) ..."
+pct exec "$CT_ID" -- su - memoh -c '
+  set -euo pipefail
+  cd ~/memoh
+  [ -f .env ] || { echo "FEHLER: ~/memoh/.env fehlt – Installer lief nicht bis zur Config-Phase."; exit 1; }
+  [ -f docker-compose.yml ] || { echo "FEHLER: ~/memoh/docker-compose.yml fehlt."; exit 1; }
+  sed -i "s/^MEMOH_CONNECT_IT_API_TOKEN=.*/MEMOH_CONNECT_IT_API_TOKEN='"''"'/" .env
+  grep -q "^MEMOH_CONNECT_IT_API_TOKEN='"''"'$" .env || { echo "FEHLER: Token konnte nicht aus .env entfernt werden."; exit 1; }
+  docker compose up -d --remove-orphans
+'
 
 # systemd-Unit aus diesem Repo übernehmen (fällt auf Inline-Unit zurück)
 SERVICE_URL="${MEMOH_SERVICE_URL:-https://raw.githubusercontent.com/HatchetMan111/Memoh-Proxmox/main/systemd/memoh.service}"

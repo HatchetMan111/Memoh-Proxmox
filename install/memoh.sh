@@ -152,8 +152,19 @@ msg_info "Storage: $STORAGE_ARG | Template-Store: $TEMPLATE_STORE | Bridge: $BRI
 # ---------------------------------------------------------------------------
 msg_info "Prüfe LXC-Template ..."
 pveam update >/dev/null 2>&1 || msg_warn "pveam update scheiterte – nutze vorhandene Templates."
-TEMPLATE="$(pveam available --section system 2>/dev/null | grep -oP "${DEFAULT_OS}[^ ]*amd64[^ ]*\.tar\.[gx]z" | sort -V | tail -n1 || true)"
-[[ -n "${TEMPLATE:-}" ]] || { msg_error "Kein ${DEFAULT_OS}-Template gefunden."; exit 1; }
+AVAILABLE_TEMPLATES="$(pveam available --section system 2>/dev/null || true)"
+# Hinweis: Proxmox liefert Templates heute als .tar.zst (nicht nur .tar.gz/.tar.xz).
+TEMPLATE="$(printf '%s' "$AVAILABLE_TEMPLATES" | grep -oP "${DEFAULT_OS}[^ ]*amd64[^ ]*\.tar\.(gz|xz|zst)" | sort -V | tail -n1 || true)"
+if [[ -z "${TEMPLATE:-}" ]]; then
+  msg_warn "Kein ${DEFAULT_OS}-Template – suche neuestes Debian-Standard-Template als Fallback ..."
+  TEMPLATE="$(printf '%s' "$AVAILABLE_TEMPLATES" | grep -oP "debian-[0-9]+-standard[^ ]*amd64[^ ]*\.tar\.(gz|xz|zst)" | sort -V | tail -n1 || true)"
+fi
+if [[ -z "${TEMPLATE:-}" ]]; then
+  msg_error "Kein Debian-Standard-Template gefunden. Verfügbare System-Templates:"
+  printf '%s\n' "$AVAILABLE_TEMPLATES" | head -n 20 >&2 || true
+  msg_error "Bitte 'pveam update' manuell prüfen (Netz/DNS auf dem Host)."
+  exit 1
+fi
 if ! pveam list "$TEMPLATE_STORE" 2>/dev/null | grep -q "$TEMPLATE"; then
   msg_info "Lade Template $TEMPLATE ..."
   pveam download "$TEMPLATE_STORE" "$TEMPLATE"

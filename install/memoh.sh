@@ -244,6 +244,15 @@ pct exec "$CT_ID" -- su - memoh -c '
   curl -fsSL https://memoh.sh | sh -s -- -y
 ' || msg_warn "Memoh-Installer meldete Fehler – prüfe gleich, ob es der bekannte Connect-It-Bug ist."
 
+# Der Upstream-Installer arbeitet in ~/memoh/Memoh, solange das Clone-Verzeichnis
+# existiert – nach einem FEHLGESCHLAGENEN Fresh-Run (compose-up bricht ab, bevor die
+# Aufräum-Kopplung nach ~/memoh stattfindet) liegen .env + docker-compose.yml NUR dort.
+# Erst nach erfolgreichem Fresh-Run liegen sie direkt in ~/memoh. Darum: erkennen.
+msg_info "Bestimme Memoh-Verzeichnis ..."
+MEMOH_DIR="$(pct exec "$CT_ID" -- su - memoh -c 'for d in "$HOME/memoh/Memoh" "$HOME/memoh"; do if [ -f "$d/.env" ] && [ -f "$d/docker-compose.yml" ]; then echo "$d"; break; fi; done' || true)"
+[[ -n "${MEMOH_DIR:-}" ]] || { msg_error "Weder ~/memoh/Memoh noch ~/memoh enthalten .env + docker-compose.yml – Installer lief nicht bis zur Config-Phase. Log prüfen."; exit 1; }
+msg_ok "Memoh-Verzeichnis: $MEMOH_DIR"
+
 # Upstream-Bug-Workaround (muss nach JEDEM Installer-Lauf stehen, da der Installer
 # das Token bei jedem Lauf neu generiert): Mit MEMOH_CONNECT_IT_MODE=disabled erzeugt
 # https://memoh.sh trotzdem ein MEMOH_CONNECT_IT_API_TOKEN und reicht es per Compose-Env
@@ -251,23 +260,24 @@ pct exec "$CT_ID" -- su - memoh -c '
 # 'connect_it: base_url and api_token must be configured together' -> server unhealthy.
 # Fix: Token aus .env entfernen (beide leer = sauber deaktiviert) und Stack hochfahren.
 msg_info "Wende Connect-It-Workaround an (Token leeren, Stack starten) ..."
-pct exec "$CT_ID" -- su - memoh -c '
+pct exec "$CT_ID" -- su - memoh -c "
   set -euo pipefail
-  cd ~/memoh
-  [ -f .env ] || { echo "FEHLER: ~/memoh/.env fehlt – Installer lief nicht bis zur Config-Phase."; exit 1; }
-  [ -f docker-compose.yml ] || { echo "FEHLER: ~/memoh/docker-compose.yml fehlt."; exit 1; }
-  sed -i "s/^MEMOH_CONNECT_IT_API_TOKEN=.*/MEMOH_CONNECT_IT_API_TOKEN='"''"'/" .env
-  grep -q "^MEMOH_CONNECT_IT_API_TOKEN='"''"'$" .env || { echo "FEHLER: Token konnte nicht aus .env entfernt werden."; exit 1; }
+  cd '$MEMOH_DIR'
+  grep -v '^MEMOH_CONNECT_IT_API_TOKEN=' .env > .env.tmp && mv .env.tmp .env
+  printf '%s\n' \"MEMOH_CONNECT_IT_API_TOKEN=''\" >> .env
+  grep -q \"^MEMOH_CONNECT_IT_API_TOKEN=''\$\" .env || { echo 'FEHLER: Token konnte nicht aus .env entfernt werden.'; exit 1; }
   docker compose up -d --remove-orphans
-'
+"
 
 # systemd-Unit aus diesem Repo übernehmen (fällt auf Inline-Unit zurück)
 SERVICE_URL="${MEMOH_SERVICE_URL:-https://raw.githubusercontent.com/HatchetMan111/Memoh-Proxmox/main/systemd/memoh.service}"
 if pct exec "$CT_ID" -- curl -fsSL -o /etc/systemd/system/memoh.service "$SERVICE_URL" 2>/dev/null; then
   msg_ok "memoh.service aus Repo übernommen."
+  # WorkingDirectory ans tatsächliche Verzeichnis anpassen (siehe MEMOH_DIR-Erkennung oben)
+  pct exec "$CT_ID" -- sed -i "s|^WorkingDirectory=.*|WorkingDirectory=$MEMOH_DIR|" /etc/systemd/system/memoh.service
 else
   msg_warn "Service-URL nicht erreichbar – schreibe Inline-Unit."
-  pct push "$CT_ID" /dev/stdin /etc/systemd/system/memoh.service <<'UNIT'
+  pct push "$CT_ID" /dev/stdin /etc/systemd/system/memoh.service <<UNIT
 [Unit]
 Description=Memoh Multi-Agent Platform (Docker Compose)
 After=network-online.target docker.service
@@ -278,7 +288,7 @@ Requires=docker.service
 Type=oneshot
 RemainAfterExit=yes
 User=memoh
-WorkingDirectory=/home/memoh/memoh
+WorkingDirectory=$MEMOH_DIR
 ExecStart=/usr/bin/docker compose up -d
 ExecStop=/usr/bin/docker compose down
 Restart=no
@@ -298,10 +308,10 @@ pct exec "$CT_ID" -- systemctl is-active memoh || { msg_error "systemd-Service m
 msg_ok "Service läuft (systemctl is-active memoh = active)."
 sleep 20  # Erststart zieht Images (1–2 Min beim allerersten Lauf möglich)
 pct exec "$CT_ID" -- curl -fs -m 15 "http://localhost:${API_PORT}/" >/dev/null \
-  || { msg_error "API antwortet nicht auf localhost:${API_PORT}."; pct exec "$CT_ID" -- docker compose -f /home/memoh/memoh/docker-compose.yml logs --tail=50 server || true; exit 1; }
+  || { msg_error "API antwortet nicht auf localhost:${API_PORT}."; pct exec "$CT_ID" -- docker compose -f $MEMOH_DIR/docker-compose.yml logs --tail=50 server || true; exit 1; }
 msg_ok "API antwortet (HTTP 200 auf localhost:${API_PORT})."
 pct exec "$CT_ID" -- curl -fs -m 15 "http://localhost:${WEB_PORT}/" >/dev/null \
-  || { msg_error "Web UI antwortet nicht auf localhost:${WEB_PORT}."; pct exec "$CT_ID" -- docker compose -f /home/memoh/memoh/docker-compose.yml logs --tail=50 web || true; exit 1; }
+  || { msg_error "Web UI antwortet nicht auf localhost:${WEB_PORT}."; pct exec "$CT_ID" -- docker compose -f $MEMOH_DIR/docker-compose.yml logs --tail=50 web || true; exit 1; }
 msg_ok "Web UI antwortet (HTTP 200 auf localhost:${WEB_PORT})."
 
 echo ""
